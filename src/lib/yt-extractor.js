@@ -30,57 +30,23 @@ export function formatBytes(bytes) {
 }
 
 export async function fetchVideoData(videoId, rawUrl = '') {
-  let errorLog = [];
+  const res = await fetch('/api/extract', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoId, url: rawUrl })
+  });
 
-  // Method 1: Next.js API Route (/api/extract)
-  try {
-    const res = await fetch('/api/extract', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoId, url: rawUrl })
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.videoDetails && data.formats?.length) {
-        return categorizeFormats(data.videoDetails, data.formats);
-      }
-    }
-  } catch (e) {
-    errorLog.push('Next API Route: ' + e.message);
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || 'Could not fetch video metadata from server.');
   }
 
-  // Method 2: Client-Side InnerTube API (Android client payload)
-  try {
-    const res = await fetch('https://www.youtube.com/youtubei/v1/player', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        context: {
-          client: {
-            clientName: 'WEB',
-            clientVersion: '2.20240901.00.00',
-            hl: 'en',
-            gl: 'US'
-          }
-        },
-        videoId: videoId
-      })
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.videoDetails && data.streamingData) {
-        return parsePlayerResponse(data);
-      }
-    }
-  } catch (e) {
-    errorLog.push('Client Direct API: ' + e.message);
+  const data = await res.json();
+  if (data.videoDetails && data.formats?.length) {
+    return categorizeFormats(data.videoDetails, data.formats);
   }
 
-  throw new Error('Could not fetch video metadata. Please check the URL or try again.');
+  throw new Error('No playable stream formats were found for this video.');
 }
 
 function parsePlayerResponse(data) {
