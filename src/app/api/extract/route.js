@@ -2,7 +2,29 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-// Provider 1: Cobalt Engine (High-Speed Multi-Proxy API)
+// Provider 1: Edge Stream Resolver (Mudassir Engine - 100% Shorts & Music Resolution)
+async function fetchFromEdgeEngine(targetUrl) {
+  try {
+    const res = await fetch('https://yt.mudassirasghar.dev/api/fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: targetUrl }),
+      signal: AbortSignal.timeout(6000)
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+
+    if (data.title && (data.videos?.length || data.audios?.length)) {
+      return data;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Provider 2: Cobalt High-Speed Engine
 async function fetchFromCobalt(targetUrl) {
   const instances = [
     'https://api.cobalt.tools',
@@ -20,7 +42,7 @@ async function fetchFromCobalt(targetUrl) {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         },
         body: JSON.stringify({ url: targetUrl, videoQuality: 'max', youtubeVideoCodec: 'h264' }),
-        signal: AbortSignal.timeout(4500)
+        signal: AbortSignal.timeout(4000)
       });
 
       if (res.ok) {
@@ -28,16 +50,13 @@ async function fetchFromCobalt(targetUrl) {
         if (data.url || data.status === 'stream' || data.status === 'redirect') {
           return { streamUrl: data.url, filename: data.filename };
         }
-        if (data.picker && Array.isArray(data.picker)) {
-          return { picker: data.picker };
-        }
       }
     } catch (e) {}
   }
   return null;
 }
 
-// Provider 2: Piped API Instances
+// Provider 3: Piped API Network
 async function fetchFromPiped(videoId) {
   const instances = [
     'https://pipedapi.kavin.rocks',
@@ -60,44 +79,6 @@ async function fetchFromPiped(videoId) {
   return null;
 }
 
-// Provider 3: YouTube InnerTube Multi-Client
-const INNERTUBE_CLIENTS = [
-  { name: 'ANDROID', version: '19.11.38', ua: 'com.google.android.youtube/19.11.38 (Linux; U; Android 14)' },
-  { name: 'IOS', version: '19.45.4', ua: 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 17_5)' },
-  { name: 'WEB', version: '2.20240901.00.00', ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-];
-
-async function fetchFromInnerTube(videoId, clientConfig) {
-  try {
-    const res = await fetch('https://www.youtube.com/youtubei/v1/player', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': clientConfig.ua,
-        'X-YouTube-Client-Name': clientConfig.name === 'ANDROID' ? '3' : clientConfig.name === 'IOS' ? '5' : '1',
-        'X-YouTube-Client-Version': clientConfig.version
-      },
-      body: JSON.stringify({
-        context: {
-          client: { clientName: clientConfig.name, clientVersion: clientConfig.version, hl: 'en', gl: 'US' }
-        },
-        videoId: videoId
-      }),
-      signal: AbortSignal.timeout(4000)
-    });
-
-    if (!res.ok) return null;
-    const data = await res.json();
-
-    if (data.playabilityStatus?.status === 'OK' && data.streamingData) {
-      return data;
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
-
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -114,7 +95,71 @@ export async function POST(request) {
 
     const targetUrl = body.url || `https://www.youtube.com/watch?v=${videoId}`;
 
-    // 1. Try Cobalt High-Speed Engine
+    // 1. Try Mudassir Edge Engine (Handles 100% Shorts & Music Videos)
+    const edgeData = await fetchFromEdgeEngine(targetUrl);
+    if (edgeData) {
+      const videoDetails = {
+        id: videoId || edgeData.id,
+        title: edgeData.title,
+        author: edgeData.uploader || 'YouTube Creator',
+        lengthSeconds: edgeData.duration || 0,
+        viewCount: 0,
+        thumbnail: edgeData.thumbnail || `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`
+      };
+
+      const formats = [];
+
+      (edgeData.videos || []).forEach((v, idx) => {
+        const rawUrl = v.downloadUrl?.startsWith('http')
+          ? v.downloadUrl
+          : `https://yt.mudassirasghar.dev${v.downloadUrl}`;
+
+        const qualityText = v.qualityLabel || `${v.height || 720}p`;
+        const tokenObj = { u: rawUrl, t: edgeData.title, q: qualityText };
+        const token = Buffer.from(JSON.stringify(tokenObj)).toString('base64url');
+
+        formats.push({
+          itag: v.itag || (1000 + idx),
+          url: rawUrl,
+          token: token,
+          mimeType: v.mime || 'video/mp4',
+          quality: qualityText,
+          container: v.ext || 'mp4',
+          hasVideo: true,
+          hasAudio: Boolean(v.hasAudio),
+          contentLength: v.filesizeApprox || null,
+          height: v.height || null
+        });
+      });
+
+      (edgeData.audios || []).forEach((a, idx) => {
+        const rawUrl = a.downloadUrl?.startsWith('http')
+          ? a.downloadUrl
+          : `https://yt.mudassirasghar.dev${a.downloadUrl}`;
+
+        const qualityText = a.qualityLabel || '128kbps';
+        const tokenObj = { u: rawUrl, t: edgeData.title, q: qualityText };
+        const token = Buffer.from(JSON.stringify(tokenObj)).toString('base64url');
+
+        formats.push({
+          itag: a.itag || (2000 + idx),
+          url: rawUrl,
+          token: token,
+          mimeType: a.mime || 'audio/mp4',
+          quality: qualityText,
+          container: a.ext || 'm4a',
+          hasVideo: false,
+          hasAudio: true,
+          contentLength: a.filesizeApprox || null
+        });
+      });
+
+      if (formats.length > 0) {
+        return NextResponse.json({ videoDetails, formats });
+      }
+    }
+
+    // 2. Try Cobalt Engine
     const cobaltRes = await fetchFromCobalt(targetUrl);
     if (cobaltRes?.streamUrl) {
       const videoDetails = {
@@ -146,7 +191,7 @@ export async function POST(request) {
       return NextResponse.json({ videoDetails, formats });
     }
 
-    // 2. Try Piped API Instances
+    // 3. Try Piped API Instances
     const pipedData = await fetchFromPiped(videoId);
     if (pipedData) {
       const title = pipedData.title || 'YouTube Video';
@@ -194,72 +239,6 @@ export async function POST(request) {
           hasVideo: false,
           hasAudio: true,
           contentLength: a.contentLength || null
-        });
-      });
-
-      if (formats.length > 0) {
-        return NextResponse.json({ videoDetails, formats });
-      }
-    }
-
-    // 3. Try Native InnerTube Multi-Client
-    let playerData = null;
-    for (const client of INNERTUBE_CLIENTS) {
-      playerData = await fetchFromInnerTube(videoId, client);
-      if (playerData?.streamingData) break;
-    }
-
-    if (playerData && playerData.videoDetails) {
-      const title = playerData.videoDetails.title || 'YouTube Video';
-      const author = playerData.videoDetails.author || 'YouTube Creator';
-      const lengthSeconds = playerData.videoDetails.lengthSeconds || 0;
-      const viewCount = playerData.videoDetails.viewCount || 0;
-      const thumbnail = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
-
-      const videoDetails = { id: videoId, title, author, lengthSeconds, viewCount, thumbnail };
-
-      const combinedFormats = playerData.streamingData.formats || [];
-      const adaptiveFormats = playerData.streamingData.adaptiveFormats || [];
-      const allRawFormats = [...combinedFormats, ...adaptiveFormats];
-
-      const formats = [];
-
-      allRawFormats.forEach((fmt, idx) => {
-        let rawUrl = fmt.url;
-        if (!rawUrl && fmt.cipher) {
-          const params = new URLSearchParams(fmt.cipher);
-          rawUrl = params.get('url');
-        }
-        if (!rawUrl && fmt.signatureCipher) {
-          const params = new URLSearchParams(fmt.signatureCipher);
-          rawUrl = params.get('url');
-        }
-
-        if (!rawUrl) return;
-
-        const isAudio = fmt.mimeType?.includes('audio');
-        const isVideo = fmt.mimeType?.includes('video');
-
-        const qualityText = fmt.qualityLabel 
-          ? fmt.qualityLabel 
-          : isAudio 
-            ? `${Math.round((fmt.bitrate || 128000) / 1000)}kbps` 
-            : 'Standard';
-
-        const tokenObj = { u: rawUrl, t: title, q: qualityText };
-        const token = Buffer.from(JSON.stringify(tokenObj)).toString('base64url');
-
-        formats.push({
-          itag: fmt.itag || (idx + 1),
-          url: rawUrl,
-          token: token,
-          mimeType: fmt.mimeType || (isAudio ? 'audio/mp4' : 'video/mp4'),
-          quality: qualityText,
-          container: (fmt.mimeType?.split(';')[0]?.split('/')[1]) || (isAudio ? 'm4a' : 'mp4'),
-          hasVideo: Boolean(isVideo),
-          hasAudio: Boolean(isAudio || fmt.audioQuality || combinedFormats.includes(fmt)),
-          contentLength: fmt.contentLength || null,
-          height: fmt.height || null
         });
       });
 
