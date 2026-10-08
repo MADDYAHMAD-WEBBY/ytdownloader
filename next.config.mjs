@@ -13,6 +13,14 @@ const nextConfig = {
       },
     ],
   },
+  async rewrites() {
+    return [
+      {
+        source: '/yt-proxy/:path*',
+        destination: 'https://www.youtube.com/:path*',
+      },
+    ];
+  },
 };
 
 export default nextConfig;
